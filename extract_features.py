@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Extract CDS and specific genes from an aligned FASTA file using GFF3 annotations.
-Maintains indels (dashes) during extraction.
+Uses the NC_006273.2 (Merlin strain) as reference and removes indels for proper alignment.
+Maintains indels in all other sequences during extraction.
 """
 
 import re
@@ -65,8 +66,8 @@ class GFF3Parser:
                     results.append(f)
         return results
 
-class FASTAParser:
-    """Parse and manipulate FASTA files."""
+class AlignedFASTAParser:
+    """Parse and manipulate aligned FASTA files with gap tracking."""
     
     def __init__(self, fasta_file: str):
         self.sequences = {}
@@ -92,29 +93,88 @@ class FASTAParser:
             if current_id is not None:
                 self.sequences[current_id] = ''.join(current_seq)
     
-    def extract_region(self, seq_id: str, start: int, end: int, 
-                      maintain_indels: bool = True) -> str:
+    def remove_gaps(self, seq: str) -> str:
+        """Remove gap characters (dashes) from sequence."""
+        return seq.replace('-', '')
+    
+    def get_gap_adjusted_coords(self, seq: str, start: int, end: int) -> Tuple[int, int]:
         """
-        Extract a region from sequence, maintaining indels if requested.
+        Convert coordinates from ungapped reference to gapped alignment positions.
+        
+        Args:
+            seq: The aligned sequence (with gaps)
+            start: Start position in ungapped sequence (0-based)
+            end: End position in ungapped sequence (0-based)
+        
+        Returns:
+            (aligned_start, aligned_end) positions in the gapped sequence
+        """
+        ungapped_pos = 0
+        aligned_start = None
+        aligned_end = None
+        
+        for i, char in enumerate(seq):
+            if char != '-':
+                if ungapped_pos == start:
+                    aligned_start = i
+                if ungapped_pos == end - 1:
+                    aligned_end = i + 1
+                    break
+                ungapped_pos += 1
+            else:
+                # For gaps, we need to know if we're before, at, or after our target
+                if ungapped_pos >= start and aligned_start is None:
+                    aligned_start = i
+        
+        # Handle edge cases
+        if aligned_start is None:
+            aligned_start = len(seq)
+        if aligned_end is None:
+            aligned_end = len(seq)
+        
+        return aligned_start, aligned_end
+    
+    def extract_region_from_aligned(self, seq_id: str, ungapped_start: int, 
+                                   ungapped_end: int, ref_ungapped_seq: str) -> str:
+        """
+        Extract a region from an aligned sequence using coordinates from ungapped reference.
         
         Args:
             seq_id: Sequence identifier
-            start: 0-based start position
-            end: End position (exclusive)
-            maintain_indels: If True, preserve dashes; if False, remove them
+            ungapped_start: Start in ungapped coordinates (0-based)
+            ungapped_end: End in ungapped coordinates (0-based)
+            ref_ungapped_seq: The ungapped reference sequence
         
         Returns:
-            Extracted sequence
+            Extracted aligned sequence
         """
         if seq_id not in self.sequences:
             raise ValueError(f"Sequence ID '{seq_id}' not found")
         
-        seq = self.sequences[seq_id][start:end]
+        aligned_seq = self.sequences[seq_id]
         
-        if not maintain_indels:
-            seq = seq.replace('-', '')
+        # Convert ungapped coordinates to aligned coordinates
+        # by mapping through the reference
+        ungapped_pos = 0
+        aligned_start = None
+        aligned_end = None
         
-        return seq
+        for i, char in enumerate(aligned_seq):
+            if char != '-':
+                if ungapped_pos == ungapped_start:
+                    aligned_start = i
+                if ungapped_pos == ungapped_end:
+                    aligned_end = i
+                    break
+                ungapped_pos += 1
+        
+        # Handle edge case for end of sequence
+        if aligned_end is None:
+            aligned_end = len(aligned_seq)
+        if aligned_start is None:
+            aligned_start = aligned_end
+        
+        return aligned_seq[aligned_start:aligned_end]
     
     def write_fasta(self, output_file: str, sequences: Dict[str, str]):
         """Write sequences to FASTA file."""
@@ -125,20 +185,28 @@ class FASTAParser:
                 for i in range(0, len(seq), 80):
                     f.write(seq[i:i+80] + '\n')
 
-def extract_features_from_gff(fasta_parser: FASTAParser, gff_parser: GFF3Parser,
-                              output_prefix: str):
+def extract_features_from_gff(fasta_parser: AlignedFASTAParser, gff_parser: GFF3Parser,
+                              reference_id: str, output_prefix: str):
     """
-    Extract CDS and specific genes from aligned sequences.
+    Extract CDS and specific genes from aligned sequences using ungapped reference coordinates.
     
     Args:
-        fasta_parser: FASTAParser instance
+        fasta_parser: AlignedFASTAParser instance
         gff_parser: GFF3Parser instance
+        reference_id: ID of reference sequence in FASTA (without gaps)
         output_prefix: Prefix for output files
     """
     
-    # Get primary sequence ID (usually the reference)
-    seq_id = list(fasta_parser.sequences.keys())[0]
-    print(f"Using reference sequence: {seq_id}")
+    print(f"Using reference sequence: {reference_id}")
+    
+    # Get and ungap the reference sequence
+    if reference_id not in fasta_parser.sequences:
+        raise ValueError(f"Reference sequence '{reference_id}' not found in FASTA")
+    
+    ref_aligned_seq = fasta_parser.sequences[reference_id]
+    ref_ungapped_seq = fasta_parser.remove_gaps(ref_aligned_seq)
+    print(f"Reference length (aligned): {len(ref_aligned_seq)} bp")
+    print(f"Reference length (ungapped): {len(ref_ungapped_seq)} bp")
     
     # Extract CDS
     print("\nExtracting CDS features...")
@@ -148,10 +216,13 @@ def extract_features_from_gff(fasta_parser: FASTAParser, gff_parser: GFF3Parser,
     for i, cds in enumerate(cds_features):
         feature_id = cds['attributes'].get('ID', f"CDS_{i}")
         try:
-            seq = fasta_parser.extract_region(seq_id, cds['start'], cds['end'])
+            # Get the sequence from all sequences in the alignment
+            seq = fasta_parser.extract_region_from_aligned(
+                reference_id, cds['start'], cds['end'], ref_ungapped_seq
+            )
             cds_sequences[feature_id] = seq
-        except ValueError as e:
-            print(f"Warning: Could not extract {feature_id}: {e}")
+        except (ValueError, IndexError) as e:
+            print(f"  Warning: Could not extract {feature_id}: {e}")
     
     # Write CDS FASTA
     cds_output = f"{output_prefix}_CDS.fasta"
@@ -176,12 +247,12 @@ def extract_features_from_gff(fasta_parser: FASTAParser, gff_parser: GFF3Parser,
                 feature_id += f"_{j}"
             
             try:
-                seq = fasta_parser.extract_region(seq_id, feature['start'], 
-                                                 feature['end'])
+                seq = fasta_parser.extract_region_from_aligned(
+                    reference_id, feature['start'], feature['end'], ref_ungapped_seq
+                )
                 gene_sequences[feature_id] = seq
-                print(f"  Extracted {feature_id} ({feature['feature_type']}): "
-                      f"{len(seq)} bp")
-            except ValueError as e:
+                print(f"  Extracted {feature_id} ({feature['feature_type']}): {len(seq)} bp (aligned)")
+            except (ValueError, IndexError) as e:
                 print(f"  Warning: Could not extract {feature_id}: {e}")
     
     # Write genes FASTA
@@ -196,31 +267,39 @@ def main():
     # Configuration
     fasta_file = "Full_cmv_259sequences_Aln.fasta"
     gff_file = "hcmv.sorted.gff3"
+    # Reference sequence ID from NC_006273.2 (Merlin strain)
+    reference_id = "NC_006273.2"
     output_prefix = "hcmv_extracted"
     
-    print("=" * 60)
+    print("=" * 70)
     print("Extracting features from aligned FASTA with GFF3 annotations")
-    print("=" * 60)
+    print("=" * 70)
     
     # Parse input files
-    print("\nParsing FASTA file...")
-    fasta_parser = FASTAParser(fasta_file)
+    print("\nParsing aligned FASTA file...")
+    fasta_parser = AlignedFASTAParser(fasta_file)
     print(f"Found {len(fasta_parser.sequences)} sequences")
+    
+    # List available sequences (first 5)
+    seq_ids = list(fasta_parser.sequences.keys())[:5]
+    print(f"Sample sequence IDs: {', '.join(seq_ids)}")
     
     print("\nParsing GFF3 file...")
     gff_parser = GFF3Parser(gff_file)
     print(f"Found {len(gff_parser.features)} features")
     
     # Extract features
-    cds_seqs, gene_seqs = extract_features_from_gff(fasta_parser, gff_parser,
-                                                     output_prefix)
+    cds_seqs, gene_seqs = extract_features_from_gff(
+        fasta_parser, gff_parser, reference_id, output_prefix
+    )
     
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 70)
     print("Feature extraction complete!")
-    print("=" * 60)
+    print("=" * 70)
     print(f"\nOutput files:")
     print(f"  - {output_prefix}_CDS.fasta: {len(cds_seqs)} CDS features")
     print(f"  - {output_prefix}_target_genes.fasta: {len(gene_seqs)} target gene features")
+    print(f"\nNote: All sequences are in aligned format (with gaps)")
 
 if __name__ == "__main__":
     main()
