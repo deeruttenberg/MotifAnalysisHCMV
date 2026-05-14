@@ -268,7 +268,7 @@ def main():
     fasta_file = "Full_cmv_259sequences_Aln.fasta"
     gff_file = "hcmv.sorted.gff3"
     # Reference sequence ID from NC_006273.2 (Merlin strain)
-    reference_id = "NC_006273.2"
+    reference_id = "Europe_United Kingdom_NC_006273.2_Human_herpesvirus_5_strain_Merlin_complete_genome"
     output_prefix = "hcmv_extracted"
     
     print("=" * 70)
