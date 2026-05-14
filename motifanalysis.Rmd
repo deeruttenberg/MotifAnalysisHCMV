@@ -1,0 +1,185 @@
+---
+title: "Motif Analysis"
+subtitle: "Bioinformatics"
+author: Dee Ruttenberg
+date: Mar. 18, 2026
+output: html_document
+---
+
+This is a form for students learning Motif Analysis for a project:
+
+# Download Tools Control
+
+```{r}
+BiocManager::install(version = "3.19", ask = FALSE, force = TRUE)
+BiocManager::install("Biostrings")
+BiocManager::install("JASPAR2020", force=TRUE)
+install.packages("devtools")
+devtools::install_version("TFMPvalue")
+BiocManager::install("TFBSTools", force=TRUE)
+BiocManager::install(c("Biostrings", "GenomicRanges", "muscle", "IRanges", "rtracklayer", "trackViewer"))
+devtools::install_git("https://gitee.com/zhangrenl/lolliplot")    # need devtools package and git software
+devtools::install_git("https://gitee.com/zhangrenl/genehapr")
+```
+
+# Prepare environment
+```{r}
+library(Biostrings)
+library(JASPAR2020)
+library(TFBSTools)
+library(tidyverse)
+library(dplyr)
+library(ape)
+library(pegas)
+library(geneHapR)
+```
+
+# Make Position Weights Matrix
+
+```{r}
+pfm <- getMatrixByID(JASPAR2020, "MA0137.2")
+pwm <- toPWM(pfm)
+pwm <- as.matrix(pwm)
+```
+
+This can be used as a scoring system match motifs to a reference file:
+
+# Finding Positions
+
+```{r}
+reverse = FALSE 
+phylo = TRUE
+gapless = FALSE
+if(phylo == TRUE){
+  seqs <- readDNAStringSet("Full_cmv_259sequences_Aln.fasta")
+}else{
+  seqs <- readDNAStringSet("hcmv15-hcmv1b-1.fasta")
+}
+if(gapless==TRUE){
+  gapless_seqs <- DNAStringSet(gsub("-", "", as.character(seqs))) 
+}else{
+  gapless_seqs <- seqs
+}
+if(reverse == TRUE){
+  gapless_seqs = reverseComplement(gapless_seqs)
+}
+matched_peaks <- lapply(gapless_seqs, function(x) suppressWarnings(matchPWM(pwm, x, "45%"))) #This is similar to a for loop, when you want to just repeats a single function over and over
+matched_motifs <- do.call(rbind, lapply(seq_along(matched_peaks), function(i) {
+  starts <- start(matched_peaks[[i]])
+  if (length(starts) == 0) return(NULL)
+  seqname <- names(gapless_seqs)[i]
+  motif_length <- ncol(pwm)
+  motifs <- sapply(starts, function(pos) as.character(subseq(gapless_seqs[[i]], pos, pos + motif_length - 1)))
+  scores <- sapply(seq_along(starts), function(j) {
+  PWMscoreStartingAt(pwm, gapless_seqs[[i]], starts[j])
+    })
+data.frame(
+    Sequence = seqname,
+    Start = starts,
+    Motif = motifs,
+    Score = scores,
+    stringsAsFactors = FALSE
+  )
+}))
+#count_peaks <- lapply(gapless_seqs, function(x) suppressWarnings(countPWM(pwm, x, "45%")))
+matched_motifs <- matched_motifs %>% filter(!grepl('-', Motif))
+if(phylo==TRUE){
+  matched_motifs <- matched_motifs %>% group_by(Start) %>% filter(n() > 3)
+  starts <- matched_motifs %>% distinct(Start) 
+  for(i in 1:length(starts[[1]])){
+    if(i==1){
+      motif_seqs <- subseq(gapless_seqs, start = starts[[1]][i], end = starts[[1]][i] + 14)
+    }
+    else{
+      subset <- subseq(gapless_seqs, start = starts[[1]][i], end = starts[[1]][i] + 14)
+      motif_seqs <- DNAStringSet(paste0(as.character(motif_seqs), as.character(subset)))
+    }
+    names(motif_seqs) <- names(gapless_seqs)
+  }
+}
+```
+
+# Phylogeny of STAT1 Sites
+```{r}
+dist_matrix <- stringDist(motif_seqs[1:5], method = "hamming")
+nj_tree <- nj(dist_matrix)
+plot(nj_tree, main="Neighbor-Joining Tree")
+```
+
+# Tajima
+```{r}
+dnabin_obj <- as.DNAbin(motif_seqs)
+tajima.test(dnabin_obj)
+```
+
+# Bootstrap the Tajima
+```{r}
+bootstrap_tajimas = c()
+for(i in 1:1){
+  x = width(gapless_seqs[1])
+  len = length(starts[[1]])
+  for(i in 1:len){
+    if(i==1){
+      starts_bs = sample(1:x, len)
+      bootstrap_seqs <- subseq(gapless_seqs, start = starts_bs[i], end =  starts_bs[i] + 14)
+    }
+    else{
+      subset <- subseq(gapless_seqs, start = starts_bs[i], end = starts_bs[i] + 14)
+      bootstrap_seqs <- DNAStringSet(paste0(as.character(bootstrap_seqs), as.character(subset)))
+    }
+    names(bootstrap_seqs) <- names(gapless_seqs)
+  }
+  dnabin_obj <- as.DNAbin(bootstrap_seqs)
+  taj = tajima.test(dnabin_obj)
+  bootstrap_tajimas = c(bootstrap_tajimas, taj$D)
+}
+```
+
+# Identity Gene Regions
+
+```{r}
+seqs <- readDNAStringSet("Full_cmv_259sequences_Aln.fasta")
+hits_138 <- vmatchPattern('ATGGACGATCTGCCGCTGAACGTCGGGTTACCCATCATCGGCGTGATGCTCGTGCTGATCGTGGCCATTCTCTGCTATCTAGCTTACCATTGGCACGACACCTTCAAACTGGTGCGCATGTTTTTGAGCTACCGCTGGCTGATCCGCTGTTGCGAGCTGTACGGGGAATACGAGCGCCGGTTCGCGGACCTGTCGTCGCTGGGCCTCGGCGCCGTACGGCGGGAGTCGGACAGACGATACCGTTTCTCCGAACGACCCGATGAGATCTTGGTCCGTTGGGAGGAAGTGTCTTCCCAGTGCAGCTACGCGTCGTCGCGGATAACAGACCGCCGCGCGGGTTCATCGTCTTCGTCGTCGGTCCACGTCGCTAACCAGAGAAACAGCGTGCCTCCGCCGGACATGGCGGTGACGGCGCCGCTGACCGACGTCGATCTGTTGAAACCCGTGACGGGATCCGCGACGCAGTTCACCACCGTAGCCATGGTACATTATCATCAAGAATACACGTGA', reverseComplement(seqs), max.mismatch=15)
+hits_136_start <- vmatchPattern('ATGTCAGTCAAGGGCGTGGAGATGCCAGAAATGACGTGGGACTTGGACGTTGGAAATAAATGGCGGCGTCGAAAGGTCCTGAGTCGCATTCACCGGTTCTGGGAATGTCGACTACGGGTGTGGTGGCTGAGTGACGCCGGCGTAAGA', reverseComplement(seqs), max.mismatch=20)
+hits_136_end <- vmatchPattern('TCATCGCCCGAAACCGGCGACGATAGCAACGACGACGCGGTTGCCGGCGGAGGTGCTGGCGGGGTAACATCATCCGCGACTCGTACGACGTCGTCGAACGCGCTGCTGCCAGAATGGATGGATGCGGTACATGTGGCGGTCCAAGCCGCCGTTCAAGCGACCGTGCAAGTAAGTGGCCCGCGGGAGAACGCCGTATCTCCCGCTACGTAA', reverseComplement(seqs), max.mismatch=20)
+hits_135 <- vmatchPattern('ATGGTGTGGCTGTGGCTCGGCGTCGGGCTCCTCGGCGGTACCGGACTGGCTTCCCTGGTCCTGGCCATTTCCTTATTTACCCAGCGCCGAGGCCGCAAGCGATCCGACGAGACTTCGTCGCGAGGCCGGCTCCCGGGTGCTGCTTCTGATAAGCGTGGTGCCTGCGCGTGCTGCTATCGAATTCCGAAAGAAGACGTCGTTGAGCCGCTGGATCTGGAACTGGGGCTCATGCGGGTGGCCACCCACCCGCCGACGCCGCAGGTGCCGCGGTGTACGTCGCTCTACATAGGAGAGGATGGTCTGCCGATAGATAAACCCGAGTTTCCTCCGGCGCGATTCGAGATCCCCGACGTATCCACGCCGGGAACGCCGACCAGCATCGGCCGATCTCCGTCGCATTGCTCCTCGTCGAGCTCTTTGTCGTCCTCGGCCAGCGTCGACACGGTACTGCATCAGCCGCCGCCATCCTGGAAGCCACCTCCGCCGCCCGGGCGCAAGAAGCGGCCGCCTACGCCGCCGGTCCGGGCCCCCACCACGCGGCTGTCGTCGCACAGGCCCCCGACGCCGATACCCGCGCCGCGTAAGAACCTGAGCACGCCGCCCACCAAGAAAACACCGCCGCCCACGAAACCCAAGCCGGTCGGCTGGACACCGCCGGTGACGCCCAGGCCCTTCCCGAAAACGCCGACGCCACAAAAGCCACCGCGGAATCCGAGACTGCCGCGCACCGTCGGGCTGGAGAATCTCTCGAAGGTGGGACTCTCGTGTCCCTGTCCCCGACCCCGCACGCCGACGGAGCCGACCACGCTGCCTATCGTGTCGGTTTCCGAGTTAGCCCCGCCTCCTCGATGGTCGGACATCGAGGAACTCTTGGAAAAGGCGGTGCAGAGCGTCATGAAGGACGCCGAGTCAATGCAGATGACCTGA', reverseComplement(seqs), max.mismatch=50)
+hits_133_start <- vmatchPattern('ATGGGTTGCGACGTGCACGATCCTTCGTGGCAATGCCAATGGGGCGTTCCCACGATTATTGTGGCCTGGATAACATGCGCGGCTTTAGGAATTTGGT', reverseComplement(seqs), max.mismatch=10)
+hits_133_end <- vmatchPattern('TGCCGTGCAGGCGGCCATGGCCGCGGCTCTACAACAACAGCAGCAGCATCAGACCGGAACGTAA', reverseComplement(seqs), max.mismatch=15)
+```
+
+#Make Subsets for Four Genes
+
+```{r}
+subseq = subseq(reverseComplement(seqs), start=56729, end=57504)
+gapless_subseq <- DNAStringSet(gsub("-", "", as.character(subseq))) 
+gapless_subseq <- gapless_subseq[width(gapless_subseq) == 768]
+aa <- translate(gapless_subseq)
+gapless_subseq <- gapless_subseq[!grepl("\\*", as.character(aa))]
+writeXStringSet(gapless_subseq, 'UL133.fasta')
+
+subseq = subseq(reverseComplement(seqs), start=57691, end=58614)
+subseq_no_gaps <- subseq[!grepl("-", as.character(subseq))]
+aa <- translate(subseq_no_gaps)
+subseq_no_stop <- subseq_no_gaps[!grepl("\\*", as.character(aa))]
+writeXStringSet(subseq_no_stop, 'UL135.fasta')
+
+subseq = subseq(reverseComplement(seqs), start=58712, end=59446)
+subseq_no_uk <- subseq[names(subseq) != "Europe_United Kingdom_GQ221974.1_Human_herpesvirus_5_strain_3157_complete_genome"]
+gapless_subseq <- DNAStringSet(gsub("-", "", as.character(subseq_no_uk))) 
+gapless_subseq <- gapless_subseq[width(gapless_subseq) == 720]
+aa <- translate(gapless_subseq)
+gapless_subseq <- gapless_subseq[!grepl("\\*", as.character(aa))]
+writeXStringSet(gapless_subseq, 'UL136.fasta')
+
+subseq = subseq(reverseComplement(seqs), start=59532, end=60038)
+#gapless_subseq <- DNAStringSet(gsub("-", "", as.character(subseq))) 
+writeXStringSet(subseq, 'UL138.fasta')
+```
+
+```{r}
+vcf <- import_vcf("hcmv.aligned.vcf")
+gff <- import_gff("hcmv.sorted.gff3", format = "GFF")
+vcf_f2 <- filter_vcf(vcf, mode = "type",
+                     gff = gff,
+                     type = "CDS")
+```
