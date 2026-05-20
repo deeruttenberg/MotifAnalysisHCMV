@@ -1,0 +1,14 @@
+
+VCFtools - 0.1.17
+(C) Adam Auton and Anthony Marcketta 2009
+
+Parameters as interpreted:
+	--vcf 259seqs.vcf
+	--maf 0.05
+	--out ./259seqs_maffiltered.vcf
+	--recode
+
+After filtering, kept 259 out of 259 Individuals
+Outputting VCF file...
+After filtering, kept 7819 out of a possible 62004 Sites
+Run Time = 2.00 seconds

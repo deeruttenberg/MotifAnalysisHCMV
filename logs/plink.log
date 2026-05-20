@@ -1,0 +1,15 @@
+PLINK v1.9.0-b.8 64-bit (22 Oct 2024)
+Options in effect:
+  --double-id
+  --file 259seqs_LD_filtered
+  --indep-pairwise 50 10 0.1
+  --vcf 259seqs_maffiltered.vcf
+
+Hostname: Dees-MacBook-Pro-2.local
+Working directory: /Users/deeruttenberg/Documents/GitHub/MotifAnalysisHCMV
+Start time: Fri May 15 16:59:41 2026
+
+Error: --vcf conflicts with another input flag.
+For more information, try "plink --help <flag name>" or "plink --help | more".
+
+End time: Fri May 15 16:59:41 2026

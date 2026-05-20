@@ -1,0 +1,16 @@
+PLINK v1.9.0-b.8 64-bit (22 Oct 2024)
+Options in effect:
+  --double-id
+  --out 259_seqs_maffiltered
+  --vcf 259seqs_maffiltered.vcf
+
+Hostname: Dees-MacBook-Pro-2.local
+Working directory: /Users/deeruttenberg/Documents/GitHub/MotifAnalysisHCMV
+Start time: Fri May 15 17:01:34 2026
+
+Random number seed: 1778878894
+16384 MB RAM detected; reserving 8192 MB for main workspace.
+--vcf: 259_seqs_maffiltered.bed + 259_seqs_maffiltered.bim +
+259_seqs_maffiltered.fam written.
+
+End time: Fri May 15 17:01:34 2026
