@@ -20,6 +20,7 @@ BiocManager::install("TFBSTools", force=TRUE)
 BiocManager::install(c("Biostrings", "GenomicRanges", "muscle", "IRanges", "rtracklayer", "trackViewer"))
 devtools::install_git("https://gitee.com/zhangrenl/lolliplot")    # need devtools package and git software
 devtools::install_git("https://gitee.com/zhangrenl/genehapr")
+devtools::install_github("ejade42/ggDNAvis")
 ```
 
 # Prepare environment
@@ -32,12 +33,18 @@ library(dplyr)
 library(ape)
 library(pegas)
 library(geneHapR)
+library(reshape2)
+library(forcats)
+library(ggDNAvis)
 ```
 
 # Make Position Weights Matrix
 
 ```{r}
-pfm <- getMatrixByID(JASPAR2020, "MA0137.2")
+#pfm <- getMatrixByID(JASPAR2020, "MA0471.1") #E246
+#pfm <- getMatrixByID(JASPAR2020, "MA1638.1") #HAND2
+pfm <- getMatrixByID(JASPAR2020, "MA1638.1") #NR2C1
+#pfm <- getMatrixByID(JASPAR2020, "MA0137.2")
 pwm <- toPWM(pfm)
 pwm <- as.matrix(pwm)
 ```
@@ -47,11 +54,12 @@ This can be used as a scoring system match motifs to a reference file:
 # Finding Positions
 
 ```{r}
-reverse = FALSE 
+setwd("~/Documents/GitHub/MotifAnalysisHCMV")
+reverse = TRUE 
 phylo = TRUE
 gapless = FALSE
 if(phylo == TRUE){
-  seqs <- readDNAStringSet("Full_cmv_259sequences_Aln.fasta")
+  seqs <- readDNAStringSet("fasta/Full_cmv_259sequences_Aln.fasta")
 }else{
   seqs <- readDNAStringSet("hcmv15-hcmv1b-1.fasta")
 }
@@ -60,7 +68,7 @@ if(gapless==TRUE){
 }else{
   gapless_seqs <- seqs
 }
-if(reverse == TRUE){
+if(reverse == FALSE){
   gapless_seqs = reverseComplement(gapless_seqs)
 }
 matched_peaks <- lapply(gapless_seqs, function(x) suppressWarnings(matchPWM(pwm, x, "45%"))) #This is similar to a for loop, when you want to just repeats a single function over and over
@@ -82,9 +90,30 @@ data.frame(
   )
 }))
 #count_peaks <- lapply(gapless_seqs, function(x) suppressWarnings(countPWM(pwm, x, "45%")))
+ggplot(matched_motifs, aes(x = Start, y = Sequence, color = Score)) +
+
+  # motif bars
+  geom_tile(height = 0.8, width = 20) +
+  scale_color_gradient(
+    low = "pink",
+    high = "red"
+  ) +
+  labs(
+    x = "Position in Sequence",
+    y = "Sequence",
+    color = "Strength"
+  ) +
+  theme(
+  axis.text.y = element_blank(),
+  axis.ticks.y = element_blank(),
+  axis.text.x = element_text(size = 16),
+  axis.title = element_text(size = 20),
+) +
+  xlim(195528,200000)
+
 matched_motifs <- matched_motifs %>% filter(!grepl('-', Motif))
 if(phylo==TRUE){
-  matched_motifs <- matched_motifs %>% group_by(Start) %>% filter(n() > 3)
+  #matched_motifs <- matched_motifs %>% group_by(Start) %>% filter(n() > 3) #This is a filter step -- messes with Tajima's D but otherwise is useful to find standing variation
   starts <- matched_motifs %>% distinct(Start) 
   for(i in 1:length(starts[[1]])){
     if(i==1){
@@ -97,13 +126,115 @@ if(phylo==TRUE){
     names(motif_seqs) <- names(gapless_seqs)
   }
 }
+
+```
+
+# Matrix of HCMV Genomes
+```{r}
+mat <- as.matrix(seqs)
+```
+
+# Admixture 
+
+```{r}
+setwd("~/Documents/GitHub/MotifAnalysisHCMV")
+tbl=read.table("data/259_seqs_maffiltered.2.Q")
+```
+
+# Visualizing individual STAT1 Sites
+```{r}
+prepare_motif_matrix <- function(matrix, tbl, start, end){
+  df_site = as.data.frame(matrix[,start:end])
+  df_site$Population = tbl$V1
+  df_site$Sample <- rownames(df_site)
+  df_site_filtered <- df_site %>% filter(!grepl('-', V10))
+  df_site_filtered <- df_site_filtered %>% filter(Population > 0.9 | Population < 0.1)
+  site_melt <- melt(df_site_filtered,id.vars = c("Sample", "Population"))
+  site_melt$variable <- as.numeric(substr(site_melt$variable, 2, 999))
+  colnames(site_melt) = c("Sample", "Population", "Site", "Nuc")
+  return(site_melt)
+}
+#STAT-1 Sites
+#df_site1 = prepare_motif_matrix(mat, tbl, 198719, 198733)
+#df_site2 = prepare_motif_matrix(mat, tbl, 196841, 196854)
+#df_site3 = prepare_motif_matrix(mat, tbl, 197091, 197104)
+#E2F6
+df_site1 = prepare_motif_matrix(mat, tbl, 196984, 196984+14)
+df_site2 = prepare_motif_matrix(mat, tbl, 196216, 196216+14)
+df_site3 = prepare_motif_matrix(mat, tbl, 196185, 196185+14)
+
+ggplot(df_site1, aes(x = Site, y = fct_reorder(Sample, Population), color=Population,fill = Nuc)) +
+
+  # motif bars
+  geom_tile(height = 1, width = 1) +
+  scale_fill_discrete(palette = scales::pal_brewer(palette = "div")) +
+  scale_color_gradient(
+    low = "black",
+    high = "grey"
+  ) +
+  labs(
+    title = "Site 1",
+    x = "Position",
+    y = "Sequence",
+    fill = "Nucleotide"
+  ) +
+  guides(color = "none") +
+  theme(
+  axis.text.y = element_blank(),
+  axis.ticks.y = element_blank(),
+  axis.text.x = element_text(size = 16),
+  axis.title = element_text(size = 20),
+)
+ggplot(df_site2, aes(x = Site, y = fct_reorder(Sample, Population), color=Population, fill = Nuc)) +
+
+  # motif bars
+  geom_tile(height = 1, width = 1) +
+  scale_fill_discrete(palette = scales::pal_brewer(palette = "div")) +
+  scale_color_gradient(
+    low = "black",
+    high = "grey"
+  ) +
+  labs(
+    title = "Site 2",
+    x = "Position",
+    y = "Sequence",
+    fill = "Nucleotide"
+  ) +
+  guides(color = "none") +
+  theme(
+  axis.text.y = element_blank(),
+  axis.ticks.y = element_blank(),
+  axis.text.x = element_text(size = 16),
+  axis.title = element_text(size = 20),
+)
+ggplot(df_site3, aes(x = Site, y = fct_reorder(Sample, Population), color=Population, fill = Nuc)) +
+  # motif bars
+  geom_tile(height = 1, width = 1) +
+  scale_fill_discrete(palette = scales::pal_brewer(palette = "div")) +
+  scale_color_gradient(
+    low = "black",
+    high = "grey"
+  ) +
+  labs(
+    title = "Site 3",
+    x = "Position",
+    y = "Sequence",
+    fill = "Nucleotide"
+  ) +
+  guides(color = "none") +
+  theme(
+  axis.text.y = element_blank(),
+  axis.ticks.y = element_blank(),
+  axis.text.x = element_text(size = 16),
+  axis.title = element_text(size = 20),
+)
 ```
 
 # Phylogeny of STAT1 Sites
 ```{r}
 dist_matrix <- stringDist(motif_seqs[1:5], method = "hamming")
 nj_tree <- nj(dist_matrix)
-plot(nj_tree, main="Neighbor-Joining Tree")
+plot(nj_tree, main="Neighbor-Joining Tree", xmax=1000)
 ```
 
 # Tajima
@@ -115,7 +246,7 @@ tajima.test(dnabin_obj)
 # Bootstrap the Tajima
 ```{r}
 bootstrap_tajimas = c()
-for(i in 1:1){
+for(i in 1:200){
   x = width(gapless_seqs[1])
   len = length(starts[[1]])
   for(i in 1:len){
@@ -133,6 +264,63 @@ for(i in 1:1){
   taj = tajima.test(dnabin_obj)
   bootstrap_tajimas = c(bootstrap_tajimas, taj$D)
 }
+```
+
+# Plot all STAT1 Sites
+```{r}
+prepare_motif_matrix_nobounds <- function(matrix, tbl){
+  df_site = as.data.frame(matrix)
+  df_site$Population = tbl$V1
+  df_site$Sample <- rownames(df_site)
+  df_site_filtered <- df_site %>% select(where(~ !any(. == "-", na.rm = TRUE)))
+  df_site_filtered <- df_site_filtered %>% filter(Population > 0.9 | Population < 0.1)
+  site_melt <- melt(df_site_filtered,id.vars = c("Sample", "Population"))
+  site_melt$variable <- as.numeric(substr(site_melt$variable, 2, 999))
+  site_melt$variable <- dense_rank(site_melt$variable)
+  colnames(site_melt) = c("Sample", "Population", "Site", "Nuc")
+  return(site_melt)
+}
+mat_motifs = as.matrix(motif_seqs)
+df_matrix = prepare_motif_matrix_nobounds(mat_motifs, tbl)
+ggplot(df_matrix, aes(x = Site, y = fct_reorder(Sample, Population),fill = Nuc)) +
+
+  # motif bars
+  geom_tile(height = 1, width = 1) +
+  scale_fill_discrete(palette = scales::pal_brewer(palette = "div")) +
+  labs(
+    title = "All Motifs",
+    x = "Position",
+    y = "Sequence",
+    fill = "Nucleotide"
+  ) +
+  guides(color = "none") +
+  theme(
+  axis.text.y = element_blank(),
+  axis.ticks.y = element_blank(),
+  axis.text.x = element_text(size = 16),
+  axis.title = element_text(size = 20),
+)
+
+mat_cntrl = as.matrix(bootstrap_seqs)
+df_matrix = prepare_motif_matrix_nobounds(mat_cntrl, tbl)
+ggplot(df_matrix, aes(x = Site, y = fct_reorder(Sample, Population),fill = Nuc)) +
+
+  # motif bars
+  geom_tile(height = 1, width = 1) +
+  scale_fill_discrete(palette = scales::pal_brewer(palette = "div")) +
+  labs(
+    title = "Control",
+    x = "Position",
+    y = "Sequence",
+    fill = "Nucleotide"
+  ) +
+  guides(color = "none") +
+  theme(
+  axis.text.y = element_blank(),
+  axis.ticks.y = element_blank(),
+  axis.text.x = element_text(size = 16),
+  axis.title = element_text(size = 20),
+)
 ```
 
 # Identity Gene Regions
@@ -174,6 +362,32 @@ writeXStringSet(gapless_subseq, 'UL136.fasta')
 subseq = subseq(reverseComplement(seqs), start=59532, end=60038)
 #gapless_subseq <- DNAStringSet(gsub("-", "", as.character(subseq))) 
 writeXStringSet(subseq, 'UL138.fasta')
+```
+
+# Plot all STAT1 Sites
+```{r}
+mat_motifs = as.matrix(motif_seqs)
+df_matrix = prepare_motif_matrix_nobounds(mat_motifs, tbl)
+ggplot(df_matrix, aes(x = Site, y = fct_reorder(Sample, Population),fill = Nuc)) +
+
+  # motif bars
+  geom_tile(height = 1, width = 1) +
+  scale_fill_discrete(palette = scales::pal_brewer(palette = "div")) +
+  labs(
+    title = "Site 1",
+    x = "Position",
+    y = "Sequence",
+    fill = "Nucleotide"
+  ) +
+  guides(color = "none") +
+  theme(
+  axis.text.y = element_blank(),
+  axis.ticks.y = element_blank(),
+  axis.text.x = element_text(size = 16),
+  axis.title = element_text(size = 20),
+)
+
+mat_cntrl = dnabin_obj
 ```
 
 ```{r}
