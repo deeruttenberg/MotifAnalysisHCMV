@@ -1,0 +1,72 @@
+---
+title: "BIO331 -- Lab 07: Bioinformatics and Working with Strings of Biological Data"
+subtitle: "Bioinformatics"
+author: Dee Ruttenberg
+date: Mar. 18, 2026
+output: html_document
+---
+
+Today we're going to apply our work on R to Bioinformatic data sets. The typical output of a DNA sequencing experiment is a fastq file, consisting of often millions of configs which need to be stitched together (do you remember the two ways we do that?). Fastq files are different from fasta files as they contain quality scores -- this is useful to see how reliable your fastq data is.  The first tool we are going to use is Fastqc, to interpret the results of our fastq files.
+
+# Bioconductor
+
+```{r Isolate Data}
+library(Biostrings)
+seqs <- readDNAStringSet("../fasta/Full_cmv_259sequences_Aln.fasta")
+```
+
+```{r align data}
+ref_raw <- seqs["Europe_Germany_JX512204.1_Human_herpesvirus_5_strain_HAN16_complete_genome"]
+ref     <- DNAString(gsub("-", "", as.character(ref_raw[[1]])))
+
+query <- readDNAStringSet("~/Documents/GitHub/MotifAnalysisHCMV/fasta/hcmv15-hcmv1b.fasta")
+reversecompquery <- reverseComplement(query)
+
+query <- DNAString(toupper(as.character(query)))
+reversecompquery <- DNAString(toupper(as.character(reversecompquery)))
+
+queryalignment <- matchPattern(query, ref, max.mismatch=20)
+reversequeryalignment <- matchPattern(reversecompquery, ref, max.mismatch=20)
+
+ref_chars <- strsplit(as.character(ref_raw[[1]]), "")[[1]]
+
+# Find which alignment columns correspond to the RC hit
+site_start <- start(reversequeryalignment[1])
+site_end   <- end(reversequeryalignment[1])
+
+# For each alignment column, track the cumulative ungapped position
+ungapped_pos <- cumsum(ref_chars != "-")
+ungapped_start <- which(ungapped_pos >= site_start)[1]
+ungapped_end <- tail(which(ungapped_pos <= site_end), 1)
+
+
+# Extract that alignment window from all 259 sequences
+isolated_sites <- subseq(seqs, ungapped_start, ungapped_end)
+
+```
+
+```{r matrix site}
+df_site <- as_data_frame(as.matrix(isolated_sites))
+snp_positions <- which(apply(df_site, 2, function(col) {
+  bases <- col[col %in% c("A","C","G","T")]
+  length(unique(bases)) > 1
+}))
+snp_matrix <- df_site[, snp_positions]
+snp_list <- lapply(snp_positions, function(pos) {
+  data.frame(
+    Sequence = rownames(df_site),
+    Position = pos,
+    Base = df_site[, pos]
+  )
+})
+names(snp_list) <- paste0("Pos_", site_start+snp_positions)
+```
+
+```{r zooming in}
+query <- DNAString(toupper(as.character('atgtcagtcaagggcgtggagatgccagaaatgacgtgggacttggacgttgg')))
+reversequery <- reverseComplement(query)
+queryalignment <- vmatchPattern(query, isolated_sites, max.mismatch=5)
+queryalignment
+reversequeryalignment <- vmatchPattern(reversequery, isolated_sites, max.mismatch=5)
+reversequeryalignment
+```

@@ -41,9 +41,11 @@ library(ggDNAvis)
 # Make Position Weights Matrix
 
 ```{r}
-#pfm <- getMatrixByID(JASPAR2020, "MA0471.1") #E246
+pfm <- getMatrixByID(JASPAR2020, "MA0471.1") #E246
 #pfm <- getMatrixByID(JASPAR2020, "MA1638.1") #HAND2
-pfm <- getMatrixByID(JASPAR2020, "MA1638.1") #NR2C1
+#pfm <- getMatrixByID(JASPAR2020, "MA1535.1") #NR2C1
+#pfm <- getMatrixByID(JASPAR2020, "UN0111.1") #ATF6B
+#pfm <- getMatrixByID(JASPAR2020, "MA0844.1") #XBP1
 #pfm <- getMatrixByID(JASPAR2020, "MA0137.2")
 pwm <- toPWM(pfm)
 pwm <- as.matrix(pwm)
@@ -56,12 +58,13 @@ This can be used as a scoring system match motifs to a reference file:
 ```{r}
 setwd("~/Documents/GitHub/MotifAnalysisHCMV")
 reverse = TRUE 
-phylo = TRUE
+phylo = FALSE
 gapless = FALSE
 if(phylo == TRUE){
   seqs <- readDNAStringSet("fasta/Full_cmv_259sequences_Aln.fasta")
 }else{
-  seqs <- readDNAStringSet("hcmv15-hcmv1b-1.fasta")
+  seqs <- readDNAStringSet("fasta/Full_cmv_259sequences_Aln.fasta")
+  seqs <- subseq(seqs, ungapped_start, ungapped_end)
 }
 if(gapless==TRUE){
   gapless_seqs <- DNAStringSet(gsub("-", "", as.character(seqs))) 
@@ -71,7 +74,7 @@ if(gapless==TRUE){
 if(reverse == FALSE){
   gapless_seqs = reverseComplement(gapless_seqs)
 }
-matched_peaks <- lapply(gapless_seqs, function(x) suppressWarnings(matchPWM(pwm, x, "45%"))) #This is similar to a for loop, when you want to just repeats a single function over and over
+matched_peaks <- lapply(gapless_seqs, function(x) suppressWarnings(matchPWM(pwm, x, "50%"))) #This is similar to a for loop, when you want to just repeats a single function over and over
 matched_motifs <- do.call(rbind, lapply(seq_along(matched_peaks), function(i) {
   starts <- start(matched_peaks[[i]])
   if (length(starts) == 0) return(NULL)
@@ -109,7 +112,7 @@ ggplot(matched_motifs, aes(x = Start, y = Sequence, color = Score)) +
   axis.text.x = element_text(size = 16),
   axis.title = element_text(size = 20),
 ) +
-  xlim(195528,200000)
+  xlim(0,4800)
 
 matched_motifs <- matched_motifs %>% filter(!grepl('-', Motif))
 if(phylo==TRUE){
@@ -117,10 +120,10 @@ if(phylo==TRUE){
   starts <- matched_motifs %>% distinct(Start) 
   for(i in 1:length(starts[[1]])){
     if(i==1){
-      motif_seqs <- subseq(gapless_seqs, start = starts[[1]][i], end = starts[[1]][i] + 14)
+      motif_seqs <- subseq(gapless_seqs, start = starts[[1]][i], end = starts[[1]][i] + motif_length)
     }
     else{
-      subset <- subseq(gapless_seqs, start = starts[[1]][i], end = starts[[1]][i] + 14)
+      subset <- subseq(gapless_seqs, start = starts[[1]][i], end = starts[[1]][i] + motif_length)
       motif_seqs <- DNAStringSet(paste0(as.character(motif_seqs), as.character(subset)))
     }
     names(motif_seqs) <- names(gapless_seqs)
@@ -159,14 +162,38 @@ prepare_motif_matrix <- function(matrix, tbl, start, end){
 #df_site2 = prepare_motif_matrix(mat, tbl, 196841, 196854)
 #df_site3 = prepare_motif_matrix(mat, tbl, 197091, 197104)
 #E2F6
-df_site1 = prepare_motif_matrix(mat, tbl, 196984, 196984+14)
-df_site2 = prepare_motif_matrix(mat, tbl, 196216, 196216+14)
-df_site3 = prepare_motif_matrix(mat, tbl, 196185, 196185+14)
+#df_site1 = prepare_motif_matrix(mat, tbl, 196984, 196984+14)
+#df_site2 = prepare_motif_matrix(mat, tbl, 196216, 196216+14)
+#df_site3 = prepare_motif_matrix(mat, tbl, 196185, 196185+14)
+#Smaller Region
+df_site1 = prepare_motif_matrix(mat, tbl, 1369, 1421)
+df_site2 = prepare_motif_matrix(mat, tbl, 1409, 1409+30)
+df_site3 = prepare_motif_matrix(mat, tbl, 1519, 1519+30)
+
+
 
 ggplot(df_site1, aes(x = Site, y = fct_reorder(Sample, Population), color=Population,fill = Nuc)) +
 
   # motif bars
   geom_tile(height = 1, width = 1) +
+    annotate(
+    "rect",
+    xmin = 13.5,
+    xmax = 24.5,
+    ymin = 0,
+    ymax = 177,
+    fill = "darkblue",
+    alpha= 0.3
+  ) +
+    annotate(
+    "rect",
+    xmin = 33.5,
+    xmax = 47.5,
+    ymin = 0,
+    ymax = 177,
+    fill = "darkblue",
+    alpha= 0.3
+  ) +
   scale_fill_discrete(palette = scales::pal_brewer(palette = "div")) +
   scale_color_gradient(
     low = "black",
